@@ -1,8 +1,8 @@
 """
 Multi-Tenancy Controller
 
-Central control loop that demonstrates the paper's core argument:
-Dynamic MIG + PCIe-aware placement + guardrails for SLO compliance
+SLO-aware GPU resource management with adaptive isolation.
+Dynamic MIG + PCIe-aware placement + lightweight guardrails.
 """
 
 import time
@@ -33,8 +33,8 @@ class ControllerState(Enum):
 
 class MultiTenancyController:
     """
-    Main controller implementing the paper's core argument:
-    SLO-aware dynamic resource management with three-tier approach
+    SLO-aware GPU resource controller.
+    Implements three-tier isolation: PCIe placement -> MIG -> guardrails.
     """
     
     def __init__(self, config: ControllerConfig):
