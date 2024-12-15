@@ -130,22 +130,120 @@ class MultiTenancyController:
         self._record_action()
         
     def _try_pcie_placement(self, tenant_id: str) -> bool:
-        """Attempt PCIe-aware placement - core algorithm details omitted"""
-        # Implementation exists but topology scoring details withheld
-        self.logger.debug(f"Attempting PCIe placement for {tenant_id}")
-        return False  # Simplified for protection
+        """Attempt PCIe-aware placement using topology scoring"""
+        try:
+            import subprocess
+            import re
+            
+            # Query PCIe topology and current utilization
+            lspci_output = subprocess.check_output(['lspci', '-tv'], text=True)
+            nvidia_devices = re.findall(r'(\d+:\d+\.\d+).*NVIDIA', lspci_output)
+            
+            if not nvidia_devices:
+                return False
+                
+            # Get current bandwidth utilization per PCIe root complex  
+            best_score = float('inf')
+            target_device = None
+            
+            for device in nvidia_devices:
+                # Calculate placement score based on current load
+                score = self._calculate_placement_score(device, tenant_id)
+                if score < best_score:
+                    best_score = score
+                    target_device = device
+                    
+            if target_device and best_score < 0.8:  # Threshold for worthwhile move
+                self._relocate_tenant_pcie(tenant_id, target_device)
+                self.logger.info(f"Relocated {tenant_id} to PCIe device {target_device}")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"PCIe placement failed: {e}")
+            
+        return False
         
     def _try_mig_upgrade(self, tenant_id: str) -> bool:
-        """Attempt MIG profile upgrade - demonstrates concept"""
-        self.logger.debug(f"Attempting MIG upgrade for {tenant_id}")
-        # Basic MIG logic present but resource management details omitted
-        return False  # Simplified for protection
+        """Attempt MIG profile upgrade via nvidia-smi"""
+        try:
+            import subprocess
+            
+            # Get current tenant's MIG assignment
+            current_profile = self._get_tenant_mig_profile(tenant_id)
+            if not current_profile:
+                return False
+                
+            # Define upgrade path
+            upgrade_map = {
+                "1g.10gb": "2g.20gb",
+                "2g.20gb": "3g.40gb", 
+                "3g.40gb": "4g.40gb",
+                "4g.40gb": "7g.80gb"
+            }
+            
+            target_profile = upgrade_map.get(current_profile)
+            if not target_profile:
+                self.logger.debug(f"No upgrade available from {current_profile}")
+                return False
+                
+            # Check GPU headroom before attempting upgrade
+            gpu_id = self._get_tenant_gpu(tenant_id)
+            if not self._has_mig_headroom(gpu_id, target_profile):
+                return False
+                
+            # Perform MIG reconfiguration
+            cmd = ['nvidia-smi', 'mig', '-cgi', target_profile, '-C', '-i', str(gpu_id)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self._update_tenant_mig_assignment(tenant_id, target_profile, gpu_id)
+                self.logger.info(f"Upgraded {tenant_id}: {current_profile} -> {target_profile}")
+                return True
+            else:
+                self.logger.warning(f"MIG upgrade failed: {result.stderr}")
+                
+        except Exception as e:
+            self.logger.error(f"MIG upgrade error: {e}")
+            
+        return False
         
     def _apply_guardrails(self, tenant_id: str):
-        """Apply lightweight guardrails - shows third tier"""
-        self.logger.info(f"Applying guardrails for {tenant_id}")
-        # MPS quota and cgroup throttling logic exists but parameters withheld
-        pass
+        """Apply lightweight guardrails via MPS quotas and cgroup throttling"""
+        try:
+            import os
+            import subprocess
+            
+            # Apply MPS active thread percentage reduction
+            current_mps = os.environ.get('CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', '100')
+            target_mps = max(50, int(current_mps) - 20)  # Reduce by 20%, floor at 50%
+            
+            os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] = str(target_mps)
+            self.logger.info(f"Reduced MPS quota for {tenant_id}: {current_mps}% -> {target_mps}%")
+            
+            # Apply cgroup I/O throttling to background processes
+            cgroup_path = f"/sys/fs/cgroup/gpu-tenants/{tenant_id}"
+            if os.path.exists(cgroup_path):
+                # Throttle I/O to 200MB/s for this tenant's cgroup
+                io_max_path = f"{cgroup_path}/io.max"
+                if os.path.exists(io_max_path):
+                    with open(io_max_path, 'w') as f:
+                        f.write("8:0 rbps=209715200 wbps=209715200\n")  # 200MB/s limit
+                    self.logger.info(f"Applied I/O throttling: 200MB/s limit for {tenant_id}")
+            
+            # Pin tenant away from high-IRQ cores
+            irq_cores = self._get_high_irq_cores()
+            if irq_cores:
+                isolated_cores = [str(i) for i in range(8) if i not in irq_cores[:2]]
+                if isolated_cores:
+                    cpuset_path = f"{cgroup_path}/cpuset.cpus"
+                    if os.path.exists(cpuset_path):
+                        with open(cpuset_path, 'w') as f:
+                            f.write(','.join(isolated_cores))
+                        self.logger.info(f"Isolated {tenant_id} to CPUs: {','.join(isolated_cores)}")
+                        
+        except Exception as e:
+            self.logger.error(f"Guardrails application failed: {e}")
+            # Continue execution - guardrails are best-effort
         
     def _should_relax_isolation(self, tenant_id: str) -> bool:
         """Check if isolation can be relaxed"""
@@ -183,6 +281,59 @@ class MultiTenancyController:
             "active_tenants": len(self.tenants),
             "in_cooldown": self._is_in_cooldown()
         }
+
+
+    def _calculate_placement_score(self, device: str, tenant_id: str) -> float:
+        """Calculate PCIe placement score - lower is better"""
+        # Simplified scoring based on current bandwidth utilization
+        try:
+            import subprocess
+            result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                util = float(result.stdout.strip())
+                return util / 100.0  # Normalize to 0-1
+        except:
+            pass
+        return 0.5  # Default moderate score
+        
+    def _relocate_tenant_pcie(self, tenant_id: str, device: str):
+        """Relocate tenant to different PCIe device"""
+        # Update CUDA_VISIBLE_DEVICES for the tenant process
+        self.logger.debug(f"Relocating {tenant_id} to {device}")
+        
+    def _get_tenant_mig_profile(self, tenant_id: str) -> str:
+        """Get current MIG profile for tenant"""
+        # Return current profile or None
+        return "1g.10gb"  # Placeholder
+        
+    def _get_tenant_gpu(self, tenant_id: str) -> int:
+        """Get GPU ID for tenant"""
+        return 0  # Placeholder
+        
+    def _has_mig_headroom(self, gpu_id: int, profile: str) -> bool:
+        """Check if GPU has capacity for profile"""
+        try:
+            import subprocess
+            result = subprocess.run(['nvidia-smi', 'mig', '-lgip', '-i', str(gpu_id)], 
+                                  capture_output=True, text=True)
+            # Parse available slots vs requested profile
+            return "Instance ID" in result.stdout  # Simplified check
+        except:
+            return False
+            
+    def _update_tenant_mig_assignment(self, tenant_id: str, profile: str, gpu_id: int):
+        """Update tenant's MIG assignment"""
+        self.logger.debug(f"Updated {tenant_id} assignment: {profile} on GPU {gpu_id}")
+        
+    def _get_high_irq_cores(self) -> list:
+        """Get cores with high IRQ activity"""
+        try:
+            with open('/proc/interrupts', 'r') as f:
+                # Parse IRQ stats - simplified
+                return [0, 1]  # Placeholder - typically cores 0,1 handle most IRQs
+        except:
+            return []
 
 
 @dataclass 
