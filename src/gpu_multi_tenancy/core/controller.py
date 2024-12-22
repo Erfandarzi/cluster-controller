@@ -285,17 +285,35 @@ class MultiTenancyController:
 
     def _calculate_placement_score(self, device: str, tenant_id: str) -> float:
         """Calculate PCIe placement score - lower is better"""
-        # Simplified scoring based on current bandwidth utilization
         try:
+            from ..placement.topology_analyzer import PCIeTopologyAnalyzer
+            from ..placement.numa_profiler import NUMAAffinityProfiler
+            
+            # Use topology-aware scoring algorithm
+            topo_analyzer = PCIeTopologyAnalyzer()
+            numa_profiler = NUMAAffinityProfiler()
+            
+            pcie_score = topo_analyzer.score_device_placement(device, tenant_id)
+            numa_score = numa_profiler.get_numa_penalty(device)
+            
+            # Weighted combination of topology factors
+            return pcie_score * 0.7 + numa_score * 0.3
+            
+        except ImportError:
+            # Fallback to basic utilization if placement modules unavailable  
             import subprocess
-            result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'], 
-                                  capture_output=True, text=True)
-            if result.returncode == 0:
-                util = float(result.stdout.strip())
-                return util / 100.0  # Normalize to 0-1
-        except:
-            pass
-        return 0.5  # Default moderate score
+            try:
+                result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    util = float(result.stdout.strip())
+                    return util / 100.0  # Normalize to 0-1
+            except:
+                pass
+            return 0.5  # Default moderate score
+        except Exception as e:
+            self.logger.debug(f"Placement scoring failed: {e}")
+            return 0.5
         
     def _relocate_tenant_pcie(self, tenant_id: str, device: str):
         """Relocate tenant to different PCIe device"""
