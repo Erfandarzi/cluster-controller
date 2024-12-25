@@ -32,7 +32,7 @@ class SLOPolicyEngine:
     """
     Core Algorithm: SLO violation detection with persistence logic
     
-    Implements the paper's key policy decisions:
+    Key policy decisions:
     1. Persistent violation detection across Y windows
     2. Dwell time enforcement to prevent thrashing  
     3. Cooldown periods after actions
@@ -62,7 +62,7 @@ class SLOPolicyEngine:
         Core policy decision algorithm
         
         Returns the action to take based on SLO metrics and internal state.
-        Implements Algorithm 1 from the paper.
+        Core decision logic based on violation persistence and timing constraints.
         """
         self.observation_count += 1
         tenant_id = metrics.tenant_id

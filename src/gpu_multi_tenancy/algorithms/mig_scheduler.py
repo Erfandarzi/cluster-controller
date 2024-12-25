@@ -44,7 +44,7 @@ class MIGScheduler:
     """
     Core Algorithm: Dynamic MIG resource allocation
     
-    Implements the paper's MIG upgrade/downgrade logic:
+    MIG upgrade/downgrade logic:
     1. Resource constraint checking before allocation
     2. Optimal profile selection based on demand
     3. GPU capacity management across tenants
@@ -55,7 +55,7 @@ class MIGScheduler:
         self.current_allocations: Dict[str, MIGAllocation] = {}  # tenant_id -> allocation
         self.gpu_capacity: Dict[int, Dict[str, int]] = {}  # gpu_id -> {profile -> available_slots}
         
-        # MIG upgrade path (paper's upgrade sequence)  
+        # MIG upgrade path sequence  
         self.upgrade_path = {
             MIGProfile.MIG_1g_10gb: MIGProfile.MIG_2g_20gb,
             MIGProfile.MIG_2g_20gb: MIGProfile.MIG_3g_40gb,
@@ -69,7 +69,7 @@ class MIGScheduler:
         """
         Check if tenant can be upgraded to next MIG profile
         
-        Core constraint checking algorithm from the paper.
+        Core constraint checking algorithm for resource availability.
         """
         if tenant_id not in self.current_allocations:
             return False

@@ -24,8 +24,7 @@ class PCIeTopologyAnalyzer:
     """
     Core algorithm: PCIe topology-aware placement scoring
     
-    Implements the paper's placement heuristic that scores candidate
-    GPU devices based on:
+    Scores candidate GPU devices based on:
     1. PCIe root complex contention  
     2. Current bandwidth utilization
     3. NUMA domain locality
@@ -57,7 +56,7 @@ class PCIeTopologyAnalyzer:
             # Component 3: NUMA locality bonus (inverse penalty)
             numa_penalty = self._calculate_numa_penalty(device.numa_node, tenant_id)
             
-            # Weighted combination (paper's formula)
+            # Weighted combination of topology factors
             total_score = (rc_penalty * 0.4 +  
                           bw_penalty * 0.4 + 
                           numa_penalty * 0.2)
