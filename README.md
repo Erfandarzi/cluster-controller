@@ -61,3 +61,4 @@ pcie_weight=0.3
 
 Logs to journald. Metrics exported to `/var/run/gpu-controller/`.
 <!-- sync2 -->
+<!-- readme: format -->
