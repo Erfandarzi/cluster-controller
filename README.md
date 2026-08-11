@@ -4,6 +4,8 @@ SLO-aware GPU resource controller. Adaptive isolation via PCIe placement, dynami
 
 Built for multi-tenant HPC workloads on A100/H100 clusters where noisy neighbors violate latency SLOs.
 
+See [`docs/`](docs/) for architecture and deployment notes.
+
 ## Features
 
 - **MIG reconfiguration**: Runtime profile changes (1g.10gb→7g.80gb) via nvidia-smi
